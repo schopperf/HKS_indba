@@ -1,40 +1,49 @@
 import urllib
 import nltk
+from nltk.corpus import wordnet as wn
+from nltk.stem.wordnet import WordNetLemmatizer
 import bs4
-import pyLDAvis as pyLDAvis
+#import pyLDAvis as pyLDAvis
+#import pyLDAvis.gensim
 import spacy
-spacy.load('en')
 from spacy.lang.en import English
 import gensim
-
+#from gensim import corpora
 import warnings
+import pickle
+from elasticsearch import Elasticsearch
+from datetime import datetime
 
-warnings.filterwarnings("ignore",category=DeprecationWarning)
+spacy.load('en')
+warnings.filterwarnings("ignore", category=DeprecationWarning)
 
+#url = "https://www.heise.de/newsticker/meldung/Jugendliche-lieben-Netflix-und-WhatsApp-keiner-mag-Facebook-4234532.html"
+#url = "https://www.theguardian.com/us-news/2018/dec/11/trump-meeting-pelosi-schumer-democrats-wall-border-funding-clash-debate-"
+url = "https://en.wikipedia.org/wiki/Lemmatization"
 
-##dis the url u gon need
-url = "https://www.heise.de/newsticker/meldung/Jugendliche-lieben-Netflix-und-WhatsApp-keiner-mag-Facebook-4234532.html"
 
 '''
-    ##small bs test
-    page = requests.get(url)
-    soup = bs4.BeautifulSoup(page.content, 'html.parser')
+##small bs test
+page = requests.get(url)
+soup = bs4.BeautifulSoup(page.content, 'html.parser')
 
-    ##do this to see the sites html.
-    print(soup.prettify())
+##do this to see the sites html.
+print(soup.prettify())
 
-
-    d##o this to get all of the text in <p> tags
-    a = soup.findAll('p')
+##do this to get all of the text in <p> tags
+a = soup.findAll('p')
 for b in a:
     print(b.getText())
 '''
+
+
 page = urllib.request.urlopen(url).read().decode('utf-8')
 soup = bs4.BeautifulSoup(page, features='html.parser').getText()
 
 tokens = nltk.word_tokenize(soup)
 
 parser = English()
+
 
 def tokenizeText(text):
     lda_tokens = []
@@ -51,9 +60,6 @@ def tokenizeText(text):
     return lda_tokens
 
 
-from nltk.corpus import wordnet as wn
-
-
 def get_lemma(word):
     lemma = wn.morphy(word)
     if lemma is None:
@@ -62,11 +68,9 @@ def get_lemma(word):
         return lemma
 
 
-from nltk.stem.wordnet import WordNetLemmatizer
-
-
 def get_lemma2(word):
     return WordNetLemmatizer().lemmatize(word)
+
 
 def prepare_text_for_lda(text):
     tokens = tokenizeText(text)
@@ -76,38 +80,59 @@ def prepare_text_for_lda(text):
     return tokens
 
 
-
-
 collection = []
 for line in tokens:
- #   print(type(line))
+    #print(type(line))
     x = prepare_text_for_lda(line)
-    if x :
-     collection.append(x)
+    if x:
+        collection.append(x)
 
 #print(collection)
 
 
-from gensim import corpora
-dictionary = corpora.Dictionary(collection )
+dictionary = corpora.Dictionary(collection)
 corpus = [dictionary.doc2bow(text) for text in collection]
 
-import pickle
 pickle.dump(corpus, open('corpus.pkl', 'wb'))
 dictionary.save('dictionary.gensim')
 
-
-import gensim
 NUM_TOPICS = 5
-ldamodel = gensim.models.ldamodel.LdaModel(corpus, num_topics = NUM_TOPICS, id2word=dictionary, passes=15)
+ldamodel = gensim.models.ldamodel.LdaModel(corpus, num_topics=NUM_TOPICS, id2word=dictionary, passes=15)
 ldamodel.save('model5.gensim')
 
 topics = ldamodel.print_topics(num_words=4)
+
+
+dictOfWords = {}
+
 for topic in topics:
-    print(topic)
+    topicList = topic[1].replace("\"", "").strip().split('+')
+    for entry in topicList:
+        entryList = entry.strip().split('*')
+        #print(entryList[1] + " -> " + entryList[0])
+        dictOfWords[entryList[1]] = float(entryList[0])
+        #dictOfWords = {[entryList[1]]: entryList[0]}
+
+#print(dictOfWords)
 
 
+es = Elasticsearch()
+esIndexName = "index_" + datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+i = 1
 
+for key, value in dictOfWords.items():
+    print(key + ": " + str(value) + " | id: " + str(i))
+    doc = {'word': key, 'value': value}
+    res = es.index(index=esIndexName, doc_type='data', id=i, body=doc)
+    print(res['result'])
+    i += 1
+
+'''
+es.indices.refresh(index=esIndexName)
+
+res = es.get(index=esIndexName, doc_type='data', id=1)
+print(res['_source'])
+'''
 
 '''
 # Create Dictionary
@@ -137,7 +162,6 @@ print('\nPerplexity: ', lda_model.log_perplexity(corpus))
 dictionary = gensim.corpora.Dictionary.load('dictionary.gensim')
 corpus = nltk.pickle.load(open('corpus.pkl', 'rb'))
 
-import pyLDAvis.gensim
 lda_display = pyLDAvis.gensim.prepare(lda, corpus, dictionary, sort_topics=False)
 pyLDAvis.display(lda_display)
 '''
