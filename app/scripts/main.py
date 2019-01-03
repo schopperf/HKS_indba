@@ -8,7 +8,7 @@ import bs4
 import spacy
 from spacy.lang.en import English
 import gensim
-#from gensim import corpora
+from gensim import corpora
 import warnings
 import pickle
 from elasticsearch import Elasticsearch
@@ -17,9 +17,11 @@ from datetime import datetime
 spacy.load('en')
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
+# insert URL to scan here
 #url = "https://www.heise.de/newsticker/meldung/Jugendliche-lieben-Netflix-und-WhatsApp-keiner-mag-Facebook-4234532.html"
 #url = "https://www.theguardian.com/us-news/2018/dec/11/trump-meeting-pelosi-schumer-democrats-wall-border-funding-clash-debate-"
 url = "https://en.wikipedia.org/wiki/Lemmatization"
+#url = "https://steamcommunity.com/"
 
 
 '''
@@ -27,7 +29,7 @@ url = "https://en.wikipedia.org/wiki/Lemmatization"
 page = requests.get(url)
 soup = bs4.BeautifulSoup(page.content, 'html.parser')
 
-##do this to see the sites html.
+##do this to see the website's html.
 print(soup.prettify())
 
 ##do this to get all of the text in <p> tags
@@ -41,7 +43,6 @@ page = urllib.request.urlopen(url).read().decode('utf-8')
 soup = bs4.BeautifulSoup(page, features='html.parser').getText()
 
 tokens = nltk.word_tokenize(soup)
-
 parser = English()
 
 
@@ -96,13 +97,15 @@ corpus = [dictionary.doc2bow(text) for text in collection]
 pickle.dump(corpus, open('corpus.pkl', 'wb'))
 dictionary.save('dictionary.gensim')
 
-NUM_TOPICS = 5
+NUM_TOPICS = 1 #5 -> number of rows
 ldamodel = gensim.models.ldamodel.LdaModel(corpus, num_topics=NUM_TOPICS, id2word=dictionary, passes=15)
 ldamodel.save('model5.gensim')
 
-topics = ldamodel.print_topics(num_words=4)
+topics = ldamodel.print_topics(num_words=1000) #4 -> number of words
+#print(topics)
 
 
+# create a dict with key/value pairs from results
 dictOfWords = {}
 
 for topic in topics:
@@ -113,26 +116,63 @@ for topic in topics:
         dictOfWords[entryList[1]] = float(entryList[0])
         #dictOfWords = {[entryList[1]]: entryList[0]}
 
-#print(dictOfWords)
 
+'''
+# for testing purposes only: count all hits and check total percentage
+sumOfValues = 0.0
+dictIndex = 1
+for key, value in dictOfWords.items():
+    value *= 100
+    print(str(dictIndex) + ". -> " + "key: " + key + " | value: " + str(value))
+    sumOfValues += value
+    dictIndex += 1
+#print("total percent: " + str(sumOfValues))
+'''
 
+# elasticsearch initiation and pushing dict keys into it
 es = Elasticsearch()
 esIndexName = "index_" + datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
 i = 1
+wordSum = 0
 
+for key, value in dictOfWords.items():
+    value1k = int(value * 1000)
+    wordSum += value1k
+    print("total sum: " + str(wordSum) + " | word: " + key + " | value: " + str(value1k))
+    for _ in range(value1k):
+        doc = {'word': key}
+        res = es.index(index=esIndexName, doc_type='data', id=i, body=doc)
+        #print(res['result'])
+        i += 1
+
+
+'''
+# stupid idea: add "Other" manually n times (= 1000-wordSum)
+for _ in range(1000-wordSum):
+    i += 1
+    doc = {'word': "Other"}
+    res = es.index(index=esIndexName, doc_type='data', id=i, body=doc)
+'''
+
+'''
+# the old way: push key/value pair with value information
 for key, value in dictOfWords.items():
     print(key + ": " + str(value) + " | id: " + str(i))
     doc = {'word': key, 'value': value}
     res = es.index(index=esIndexName, doc_type='data', id=i, body=doc)
     print(res['result'])
     i += 1
+'''
+
 
 '''
+# refresh index and see result...not necessary, we use kibana :D
 es.indices.refresh(index=esIndexName)
 
 res = es.get(index=esIndexName, doc_type='data', id=1)
 print(res['_source'])
 '''
+
 
 '''
 # Create Dictionary
